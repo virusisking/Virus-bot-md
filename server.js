@@ -1,0 +1,59 @@
+// VIRUS-MD FINAL - OWNER 2349163017424
+const express=require("express");
+const {default:makeWASocket,useMultiFileAuthState,delay,makeCacheableSignalKeyStore}=require("@whiskeysockets/baileys");
+const pino=require("pino"); const fs=require("fs"); const bodyParser=require("body-parser"); const session=require("express-session");
+const app=express(); app.use(bodyParser.urlencoded({extended:true})); app.use(bodyParser.json()); app.use(session({secret:"virus-md-0916",resave:false,saveUninitialized:true}));
+const PORT=process.env.PORT||10000; const PASSWORD="Sammy123$"; const OWNER="2349163017424"; const BOTNAME="VIRUS-MD";
+if(!fs.existsSync("./data")) fs.mkdirSync("./data");
+if(!fs.existsSync("./data/commands.json")) fs.writeFileSync("./data/commands.json",JSON.stringify({menu:`await sock.sendMessage(from,{text:"*VIRUS-MD MENU*\\n.ping\\n.menu\\n.owner\\n.tagall\\n.poll Q | A | B\\n.gcstatus Text"})`,ping:`await sock.sendMessage(from,{text:"✅ VIRUS-MD ACTIVE\\nOwner 09163017424"})`,owner:`await sock.sendMessage(from,{text:"👑 Owner: 09163017424\\nBot: VIRUS-MD"})`,tagall:`if(!from.includes("@g.us")) return sock.sendMessage(from,{text:"Group only"}); let g=await sock.groupMetadata(from); let t=""; let m=[]; for(let p of g.participants){t+="@"+p.id.split("@")[0]+" "; m.push(p.id)}; await sock.sendMessage(from,{text:t,mentions:m})`,poll:`let args=(msg.message.conversation||msg.message.extendedTextMessage?.text||"").slice(5).trim(); if(!args.includes("|")) return sock.sendMessage(from,{text:"Use: .poll Q | Yes | No"}); let parts=args.split("|").map(x=>x.trim()); await sock.sendMessage(from,{poll:{name:parts[0],values:parts.slice(1),selectableCount:1}})`,gcstatus:`if(!from.includes("@g.us")) return sock.sendMessage(from,{text:"Group only"}); let txt=(msg.message.conversation||"").slice(9).trim(); if(!txt) return sock.sendMessage(from,{text:"Use .gcstatus NewText"}); await sock.groupUpdateSubject(from,txt).catch(async()=>{await sock.groupUpdateDescription(from,txt)}); await sock.sendMessage(from,{text:"✅ Updated: "+txt})`},null,2));
+if(!fs.existsSync("./data/banned.json")) fs.writeFileSync("./data/banned.json",JSON.stringify([]));
+if(!fs.existsSync("./data/settings.json")) fs.writeFileSync("./data/settings.json",JSON.stringify({botName:BOTNAME,owner:OWNER,prefix:".",antiDelete:false,antiLink:false,autoViewStatus:false,autoLikeStatus:false,welcome:false,goodbye:false},null,2));
+if(!fs.existsSync("./sessions")) fs.mkdirSync("./sessions");
+function getData(f){return JSON.parse(fs.readFileSync("./data/"+f))}
+let msgCache={};
+async function startBot(number){
+ const {state,saveCreds}=await useMultiFileAuthState("./sessions/"+number);
+ const sock=makeWASocket({logger:pino({level:"silent"}),auth:{creds:state.creds,keys:makeCacheableSignalKeyStore(state.keys,pino({level:"silent"}))},browser:[BOTNAME,"Chrome","1.0"]});
+ sock.ev.on("creds.update",saveCreds);
+ sock.ev.on("messages.upsert",async({messages})=>{
+  const msg=messages[0]; if(!msg.message) return;
+  let settings=getData("settings.json");
+  if(msg.key.remoteJid==="status@broadcast" && settings.autoViewStatus){ await sock.readMessages([msg.key]); if(settings.autoLikeStatus){ await sock.sendMessage("status@broadcast",{react:{text:"🔥",key:msg.key}},{statusJidList:[msg.key.participant]}).catch(()=>{}) } return; }
+  if(msg.key.fromMe) return;
+  const from=msg.key.remoteJid; const banned=getData("banned.json"); if(banned.includes(from.split("@")[0])) return;
+  if(settings.antiDelete && !msg.message.protocolMessage){ msgCache[msg.key.id]={msg,from} }
+  if(msg.message.protocolMessage && msg.message.protocolMessage.type===0 && settings.antiDelete){
+   let delId=msg.message.protocolMessage.key.id; let cached=msgCache[delId];
+   if(cached){ let m=cached.msg; let txt=m.message.conversation||m.message.extendedTextMessage?.text||"[Media]"; await sock.sendMessage(cached.from,{text:"*ANTI-DELETE*\\nFrom @"+(m.key.participant?.split("@")[0]||"")+"\\n"+txt,mentions:[m.key.participant]}) }
+  }
+  let body=msg.message.conversation||msg.message.extendedTextMessage?.text||"";
+  if(settings.antiLink && from.includes("@g.us") && body.includes("chat.whatsapp.com")){ await sock.sendMessage(from,{text:"Link detected"}); try{await sock.groupParticipantsUpdate(from,[msg.key.participant],"remove")}catch(e){} return; }
+  if(!body.startsWith(settings.prefix)) return;
+  let cmd=body.slice(settings.prefix.length).split(" ")[0].toLowerCase();
+  let cmds=getData("commands.json");
+  if(cmds[cmd]){ try{ let fn=new Function('sock','from','msg','BOTNAME',cmds[cmd]); await fn(sock,from,msg,BOTNAME) }catch(e){ await sock.sendMessage(from,{text:"Error: "+e.message}) } }
+ });
+ sock.ev.on("group-participants.update",async(u)=>{
+  let s=getData("settings.json"); const id=u.id;
+  for(let user of u.participants){
+   if(u.action==="add" && s.welcome) await sock.sendMessage(id,{text:"*WELCOME* 👋 @"+user.split("@")[0],mentions:[user]});
+   if(u.action==="remove" && s.goodbye) await sock.sendMessage(id,{text:"*GOODBYE* 👋 @"+user.split("@")[0],mentions:[user]});
+  }
+ });
+}
+fs.readdirSync("./sessions").forEach(n=>{try{startBot(n)}catch{}});
+app.get("/code",async(req,res)=>{ let number=req.query.number.replace(/[^0-9]/g,""); const {state,saveCreds}=await useMultiFileAuthState("./sessions/"+number); const sock=makeWASocket({logger:pino({level:"silent"}),auth:{creds:state.creds,keys:makeCacheableSignalKeyStore(state.keys,pino({level:"silent"}))},browser:[BOTNAME,"Chrome","1.0"]}); sock.ev.on("creds.update",saveCreds); await delay(1500); try{ if(!sock.authState.creds.registered){ const code=await sock.requestPairingCode(number); res.json({code})} else{ startBot(number); res.json({error:"Already paired"})} }catch(e){res.json({error:e.message})} });
+app.get("/",(req,res)=>{res.send(`<body style="background:#000;color:#0f0;font-family:monospace;display:flex;justify-content:center;align-items:center;height:100vh"><div style="border:2px solid #0f0;padding:20px;border-radius:10px;text-align:center"><h2>VIRUS-MD</h2><p>Owner: 09163017424</p><input id="num" value="2349163017424" style="padding:10px;background:#111;border:1px solid #0f0;color:#0f0"><br><br><button onclick="pair()" style="padding:10px;background:#0f0">GET CODE</button><p id="o"></p><a href="/admin" style="color:#0f0">Panel</a></div><script>async function pair(){let n=document.getElementById('num').value;document.getElementById('o').innerText='Wait...';let r=await fetch('/code?number='+n);let d=await r.json();document.getElementById('o').innerText=d.code||d.error}</script></body>`)});
+app.get("/admin",(req,res)=>{res.send(`<body style="background:#000;color:#0f0;display:flex;justify-content:center;align-items:center;height:100vh"><form method="POST" action="/admin/login" style="border:1px solid #0f0;padding:20px"><h3>VIRUS-MD LOGIN</h3><input name="password" type="password" placeholder="Sammy123$" style="padding:10px;background:#111;border:1px solid #0f0;color:#0f0"><br><br><button style="background:#0f0;padding:10px;width:100%">LOGIN</button></form></body>`)});
+app.post("/admin/login",(req,res)=>{if(req.body.password===PASSWORD){req.session.admin=true;return res.redirect("/admin/panel")}res.send("Wrong")});
+app.get("/admin/panel",(req,res)=>{
+ if(!req.session.admin) return res.redirect("/admin");
+ const cmds=getData("commands.json"); const banned=getData("banned.json"); const set=getData("settings.json");
+ res.send(`<html><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{background:#0a0a0a;color:#fff;padding:15px}.c{background:#111;border:1px solid #222;padding:12px;border-radius:12px;margin-bottom:12px}input,select,textarea{width:95%;padding:10px;background:#000;border:1px solid #333;color:#0f0;margin:4px 0;border-radius:6px}button{background:#0f0;color:#000;padding:8px;border:none;border-radius:6px;font-weight:bold}.toggle{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #222}</style><body><h2>🦠 ${set.botName} - 09163017424</h2><div class="c"><form method="POST" action="/admin/save-settings"><label>Bot Name</label><input name="botName" value="${set.botName}"><label>Prefix</label><input name="prefix" value="${set.prefix}"><div class="toggle"><span>Anti-Delete</span><select name="antiDelete"><option value="true" ${set.antiDelete?'selected':''}>ON ✅</option><option value="false" ${!set.antiDelete?'selected':''}>OFF ❌</option></select></div><div class="toggle"><span>Anti-Link</span><select name="antiLink"><option value="true" ${set.antiLink?'selected':''}>ON ✅</option><option value="false" ${!set.antiLink?'selected':''}>OFF ❌</option></select></div><div class="toggle"><span>Auto View Status</span><select name="autoViewStatus"><option value="true" ${set.autoViewStatus?'selected':''}>ON ✅</option><option value="false" ${!set.autoViewStatus?'selected':''}>OFF ❌</option></select></div><div class="toggle"><span>Auto Like Status</span><select name="autoLikeStatus"><option value="true" ${set.autoLikeStatus?'selected':''}>ON ✅</option><option value="false" ${!set.autoLikeStatus?'selected':''}>OFF ❌</option></select></div><div class="toggle"><span>Welcome</span><select name="welcome"><option value="true" ${set.welcome?'selected':''}>ON ✅</option><option value="false" ${!set.welcome?'selected':''}>OFF ❌</option></select></div><div class="toggle"><span>Goodbye</span><select name="goodbye"><option value="true" ${set.goodbye?'selected':''}>ON ✅</option><option value="false" ${!set.goodbye?'selected':''}>OFF ❌</option></select></div><br><button style="width:100%">SAVE ALL</button></form></div><div class="c"><h4>➕ ADD COMMAND</h4><form method="POST" action="/admin/add-cmd"><input name="name" placeholder="e.g alive"><textarea name="code" placeholder="await sock.sendMessage(from,{text:'hi'})"></textarea><br><button>Add</button></form><hr>${Object.keys(cmds).map(k=>`<div style="display:flex;justify-content:space-between;padding:6px"><span>.${k}</span><a href="/admin/del-cmd?name=${k}" style="color:red">Del</a></div>`).join("")}</div><div class="c"><h4>🚫 BAN</h4><form method="POST" action="/admin/ban"><input name="number" placeholder="234..."><button style="background:red;color:#fff">BAN</button></form>${banned.map(n=>`<div>${n} <a href="/admin/unban?number=${n}" style="color:#0f0">Unban</a></div>`).join("")}</div></body></html>`)
+});
+app.post("/admin/save-settings",(req,res)=>{if(!req.session.admin) return res.redirect("/admin"); let s={botName:req.body.botName,owner:OWNER,prefix:req.body.prefix,antiDelete:req.body.antiDelete==='true',antiLink:req.body.antiLink==='true',autoViewStatus:req.body.autoViewStatus==='true',autoLikeStatus:req.body.autoLikeStatus==='true',welcome:req.body.welcome==='true',goodbye:req.body.goodbye==='true'}; fs.writeFileSync("./data/settings.json",JSON.stringify(s,null,2)); res.redirect("/admin/panel")});
+app.post("/admin/add-cmd",(req,res)=>{if(!req.session.admin) return res.redirect("/admin"); let c=getData("commands.json"); c[req.body.name.toLowerCase()]=req.body.code; fs.writeFileSync("./data/commands.json",JSON.stringify(c,null,2)); res.redirect("/admin/panel")});
+app.get("/admin/del-cmd",(req,res)=>{if(!req.session.admin) return res.redirect("/admin"); let c=getData("commands.json"); delete c[req.query.name]; fs.writeFileSync("./data/commands.json",JSON.stringify(c,null,2)); res.redirect("/admin/panel")});
+app.post("/admin/ban",(req,res)=>{if(!req.session.admin) return res.redirect("/admin"); let b=getData("banned.json"); if(!b.includes(req.body.number)) b.push(req.body.number); fs.writeFileSync("./data/banned.json",JSON.stringify(b)); res.redirect("/admin/panel")});
+app.get("/admin/unban",(req,res)=>{if(!req.session.admin) return res.redirect("/admin"); let b=getData("banned.json"); b=b.filter(x=>x!==req.query.number); fs.writeFileSync("./data/banned.json",JSON.stringify(b)); res.redirect("/admin/panel")});
+app.listen(PORT,()=>console.log("VIRUS-MD RUNNING"));
